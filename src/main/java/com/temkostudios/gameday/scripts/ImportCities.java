@@ -1,5 +1,6 @@
 package com.temkostudios.gameday.scripts;
 
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
@@ -8,10 +9,13 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVRecord;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.temkostudios.gameday.model.Bowl;
 import com.temkostudios.gameday.model.City;
@@ -21,35 +25,27 @@ import com.temkostudios.gameday.model.State;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class ImportBowls {
+public class ImportCities {
 
-    public static final String DB_URL = "jdbc:mysql://mysql.hoster905.com:3308/yangtemk_gameday?serverTimezone=UTC";
-    public static final String DB_USERNAME = "gamedayadmin";
-    public static final String DB_PASSWORD = "Gameday is awesome Y3ah!";
-
-    public ArrayList<City> cities;
-    public ArrayList<State> states;
-    public ArrayList<Bowl> bowls;
-    public ArrayList<Game> games;
+    public ArrayList<City> newCities;
+    public ArrayList<City> existingCities;
+    public HashMap<String, State> stateMap;
     String sessionToken;
     HttpClient client = HttpClient.newHttpClient();
     ObjectMapper mapper = new ObjectMapper();
 
-    public final static String[] bowlFileHeaders = { "TEAM_OR_DATE", "NAME", "TIME", "NETWORK", "FINAL_SCORE", "SPREAD",
-            "CITY", "STATE" };
-
     public static void main(String args[]) {
-        ImportBowls bowlImporter = new ImportBowls();
-        bowlImporter.importBowls();
+        ImportCities cityImporter = new ImportCities();
+        cityImporter.importCities();
         System.exit(0);
     }
 
-    public void importBowls() {
+    public void importCities() {
         int rCount = 0;
         sessionToken = login();
+        stateMap = getStates();
 
-        cities = getCities();
-        states = getStates();
+        newCities = getNewCities();
         try (Reader in = new FileReader("2024bowlmaster.csv")) {
 
             CSVFormat csvFormat = CSVFormat.DEFAULT.builder()
@@ -100,24 +96,25 @@ public class ImportBowls {
 
     }
 
-    public ArrayList<City> getCities() {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create("http://localhost:8080/api/city"))
-                .GET()
-                .header("Content-Type", "application/json")
-                .header("Authorization", "Bearer " + sessionToken)
-                .build();
+    public ArrayList<City> getNewCities() {
         try {
-            HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
-            AllCityResponse result = mapper.readValue(response.body(), AllCityResponse.class);
-            return result.getData();
-        } catch (IOException | InterruptedException e) {
+            ArrayList<City> cityList = new ArrayList<>();
+            List<SchoolData> schoolList = mapper.readValue(new File("schoolList.json"),  new TypeReference<List<SchoolData>>(){});
+            schoolList.forEach(school -> {
+                City city = new City();
+                city.setName(school.getLocation().getCity());
+                // YOU ARE HERE - NEED TO GET THE STATE FROM THE SERVICE AND USE THE IDS WHILE POPULATING THIS LIST
+                city.setStateId(stateMap.get(school.getAbbreviation()).getId());
+            });
+            return cityList;
+        } catch (IOException e) {
             log.error("Error getting City Data", e);
             return null;
         }
     }
 
-    public ArrayList<State> getStates() {
+    public HashMap<String, State> getStates() {
+        HashMap<String, State> newStateMap = new HashMap<>();
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create("http://localhost:8080/api/state"))
                 .GET()
@@ -127,7 +124,8 @@ public class ImportBowls {
         try {
             HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
             AllStateResponse result = mapper.readValue(response.body(), AllStateResponse.class);
-            return result.getData();
+            result.getData().forEach(city -> newStateMap.put(city.getAbbrv(), city));
+            return newStateMap;
         } catch (IOException | InterruptedException e) {
             log.error("Error getting State Data", e);
             return null;
